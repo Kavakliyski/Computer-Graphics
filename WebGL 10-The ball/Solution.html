@@ -1,0 +1,290 @@
+﻿<!DOCTYPE html>
+
+<head>
+	<meta charset="utf-8"/>
+	<title>Кълбото</title>
+
+	<script src="webgl-fmi.js"></script>
+	<script src="shaders.js"></script>
+	
+	<script>
+		// небесен куб - конструктор
+		Skybox = function(center,size)
+		{	
+			// върхове
+			var v = [ [+0.5,-0.5,-0.5], [+0.5,+0.5,-0.5],
+					  [-0.5,+0.5,-0.5], [-0.5,-0.5,-0.5],
+					  [+0.5,-0.5,+0.5], [+0.5,+0.5,+0.5],
+					  [-0.5,+0.5,+0.5], [-0.5,-0.5,+0.5] ];
+			// общ списък на съвпадащи координати на връх и тексел
+			var data = [].concat(
+					  v[0], v[1], v[4], // предна стена
+					  v[4], v[1], v[5],
+					  v[6], v[2], v[7], // задна стена
+					  v[7], v[2], v[3], 
+					  v[5], v[1], v[6], // дясна стена 
+					  v[6], v[1], v[2], 
+					  v[4], v[7], v[0], // лява стена 
+					  v[0], v[7], v[3], 
+					  v[4], v[5], v[7], // горна стена
+					  v[7], v[5], v[6], 
+					  v[0], v[3], v[1], // долна стена 
+					  v[1], v[3], v[2] );
+			var buf = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+			this.buf = buf;
+			this.center = center;
+			this.size = size;
+			this.texture = undefined; // неизвестна текстура
+		}
+
+		// небесен куб - метод за рисуване
+		Skybox.prototype.draw = function()
+		{	
+			pushMatrix();
+				translate(this.center);
+				scale([this.size,this.size,this.size]);
+				xRotate(-90);
+				useMatrix();
+				
+				gl.bindBuffer(gl.ARRAY_BUFFER,this.buf);
+				gl.enableVertexAttribArray(aXYZ);
+				gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,3*FLOATS,0*FLOATS);
+				// казваме къде са текстурите, ако всичките 6 са вече заредени
+				if (gl.isTexture(this.texture) && !this.texture.count)
+				{
+					gl.bindTexture(gl.TEXTURE_CUBE_MAP,this.texture);
+					gl.drawArrays(gl.TRIANGLES,0,36);
+				}
+			popMatrix();
+		}
+
+		// огледална сфера - конструктор
+		ReflectiveSphere = function(center,size,level)
+		{	
+			var data = [];
+			var n = 0;
+			
+			// средна точка на отсечка
+			function mid(p,q)
+			{
+				return [(p[0]+q[0])/2,(p[1]+q[1])/2,(p[2]+q[2])/2];
+			}
+			
+			function triangle(p1,p2,p3,level)
+			{
+				if (level)
+				{	// ако не сме достигнали границата на раздробяване,
+					//  делим триъгълника на 4 по-малки триъгълника
+					var m12 = mid(p1,p2);
+					var m23 = mid(p2,p3);
+					var m31 = mid(p3,p1);
+					level--;
+					triangle(p1,m12,m31,level);
+					triangle(m12,p2,m23,level);
+					triangle(m31,m23,p3,level);
+					triangle(m12,m23,m31,level);
+				}
+				else
+				{	// стигнали сме границата на раздробяване,
+					// генерираме триъгълника
+					p1 = unitVector(p1);
+					p2 = unitVector(p2);
+					p3 = unitVector(p3);
+					data.push( p1[0], p1[1], p1[2] );
+					data.push( p2[0], p2[1], p2[2] );
+					data.push( p3[0], p3[1], p3[2] );
+					n++;
+				}
+			}
+			
+			// златното сечение 1.618...
+			var f = (1+Math.sqrt(5))/2;
+
+			// триъгълници - стени на икосаедър
+			triangle([ 0, 1, f], [ 1, f, 0], [-1, f, 0], level);	// десен горен
+			triangle([ 0, 1,-f], [-1, f, 0], [ 1, f, 0], level);	// десен долен
+			triangle([ 0,-1, f], [-1,-f, 0], [ 1,-f, 0], level);	// ляв горен
+			triangle([ 0,-1,-f], [ 1,-f, 0], [-1,-f, 0], level);	// ляв долен
+
+			triangle([ 1, f, 0], [ f, 0, 1], [ f, 0,-1], level);	// предни и задни
+			triangle([ 1,-f, 0], [ f, 0,-1], [ f, 0, 1], level);
+			triangle([-1, f, 0], [-f, 0,-1], [-f, 0, 1], level);
+			triangle([-1,-f, 0], [-f, 0, 1], [-f, 0,-1], level);
+
+			triangle([ f, 0, 1], [ 0, 1, f], [ 0,-1, f], level);	// горни и долни
+			triangle([-f, 0, 1], [ 0,-1, f], [ 0, 1, f], level);
+			triangle([ f, 0,-1], [ 0,-1,-f], [ 0, 1,-f], level);
+			triangle([-f, 0,-1], [ 0, 1,-f], [ 0,-1,-f], level);
+
+			triangle([ 0, 1, f], [ f, 0, 1], [ 1, f, 0], level);	// горни ъглови 
+			triangle([ 0, 1, f], [-1, f, 0], [-f, 0, 1], level);
+			triangle([ 0,-1, f], [ 1,-f, 0], [ f, 0, 1], level); 
+			triangle([ 0,-1, f], [-f, 0, 1], [-1,-f, 0], level);
+			
+			triangle([ 0, 1,-f], [ 1, f, 0], [ f, 0,-1], level);	// долни ъглови 
+			triangle([ 0, 1,-f], [-f, 0,-1], [-1, f, 0], level);
+			triangle([ 0,-1,-f], [ f, 0,-1], [ 1,-f, 0], level); 
+			triangle([ 0,-1,-f], [-1,-f, 0], [-f, 0,-1], level);
+			
+			var buf = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+			
+			this.n = n; // запомняме броя триъгълници
+			this.buf = buf;
+			this.center = center;
+			this.size = size;
+		}
+
+		// огледална сфера - метод за рисуване
+		ReflectiveSphere.prototype.draw = function()
+		{	
+			pushMatrix();
+			translate(this.center);
+			scale([this.size,this.size,this.size]);
+			xRotate(-90);
+			useMatrix();
+				gl.bindBuffer(gl.ARRAY_BUFFER,this.buf);
+				gl.enableVertexAttribArray(aXYZ);
+				gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,3*FLOATS,0*FLOATS);
+				gl.drawArrays(gl.TRIANGLES,0,3*this.n);
+			popMatrix();
+		}
+		
+		
+		// създаване на празна кубична текстура
+		function texture3D()
+		{
+			var texture = gl.createTexture();
+			texture.count = 6;
+			return texture;
+		}
+		
+		// заявка за зареждане на една от 6-те текстури на кубична подтекстура
+		function loadTexture3D(texture,side,url)
+		{
+			var image = new Image();
+			image.onload = function()
+			{
+				imageLoaded3D(texture,image,side);
+			};
+			image.src = url;
+		}
+			
+		// функция, която се извиква при зареждането на кубична текстура
+		function imageLoaded3D(texture,image,side)
+		{
+			gl.bindTexture(gl.TEXTURE_CUBE_MAP, texture);
+//			gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+			gl.texImage2D(side, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+			texture.count--;
+			if (texture.count==0)
+			{
+				gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
+				gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+				gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+			}
+			gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
+		}
+
+		function start( )
+		{
+			var	canvas = document.getElementById("picasso");
+			canvas.addEventListener('webglcontextlost',function(event){event.preventDefault();},false);
+			canvas.addEventListener('webglcontextrestored',function(){init();},false);
+
+			init();
+			drawFrame();
+		}
+		
+		function init()
+		{
+			gl = getContext("picasso");
+			glprog = getProgram(vShader,fShader);
+			getVariables();
+
+			gl.enable(gl.DEPTH_TEST);
+			gl.clearColor(1,1,1,1);
+
+			identity();
+			perspective(30,gl.canvas.width/gl.canvas.height,1,40000);
+
+			// използваме модул №0 за текстури
+			gl.activeTexture(gl.TEXTURE0);
+			gl.uniform1i(uTexUnit, 0);
+
+			// дефиниране на небесен куб 
+			sky = new Skybox([0,0,0],10);
+			
+			// зареждане на 6-те текстури
+			sky.texture = texture3D();
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_POSITIVE_X,'posx.jpg');
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_NEGATIVE_X,'negx.jpg');
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_POSITIVE_Y,'posy.jpg');
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_NEGATIVE_Y,'negy.jpg');
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_POSITIVE_Z,'posz.jpg');
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_NEGATIVE_Z,'negz.jpg');
+
+			// огледална сфера
+			mirror = new ReflectiveSphere([0,0,0],1,5);
+			
+			// магия - улавяне на движението на мишката
+			gl.canvas.addEventListener("mousemove", mouseMove);
+		}
+
+		
+		// магия - движение на мишката
+		var a=0, b=0, dA=0.1, dB=0;
+		function mouseMove(event)
+		{
+			dA = (gl.canvas.width/2-(event.clientX-gl.canvas.offsetLeft))/400;
+			dB = (gl.canvas.height/2-(event.clientY-gl.canvas.offsetTop))/300;
+		}
+
+		var time = now();
+		var dT = 0;
+		function now() { return (new Date()).getTime()/1000; }
+		
+		function drawFrame()
+		{
+			var oldTime = time;
+			time = now();
+			dT = time-oldTime;
+			gl.clear(gl.COLOR_BUFFER_BIT+gl.DEPTH_BUFFER_BIT);
+			
+			// въртене на сцената
+			a += dA*dT; // хоризонтално
+			b -= dB*dT; // вертикално
+			if (b>1.5) b=1.5;   // вертикално сме винаги в диапазона
+			if (b<-1.5) b=-1.5; // от около -пи/2 до пи/2
+
+	
+			lookAt([0,0,0],[-cos(a)*cos(b),-sin(a)*cos(b),-sin(b)],[0,0,1]);
+			
+			// рисуване на сферата
+			gl.uniform1i(uReflect,true);
+			if (!sky.texture.count) mirror.draw();
+			
+			// рисуване на куба
+			gl.uniform1i(uReflect,false);
+			sky.draw();
+			
+			requestAnimationFrame(drawFrame);
+		}
+	</script>	
+</head>
+
+<body onload="start()">
+	<h2>Кълбото</h2>
+
+	<noscript>
+		Искаме JavaScript, но няма!
+	</noscript>
+	
+	<canvas id="picasso" width="600" height="400" style="border: solid;">
+		Искаме canvas, но няма!
+	</canvas>
+	<div><small><i>Сцената се върти с движение на мишката.</i></small></div>
+</body>

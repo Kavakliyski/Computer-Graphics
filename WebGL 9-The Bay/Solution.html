@@ -1,0 +1,318 @@
+﻿<!DOCTYPE html>
+
+<head>
+	<meta charset="utf-8"/>
+	<title>Заливът</title>
+
+	<script src="webgl-fmi.js"></script>
+	<script src="shaders.js"></script>
+	
+	<script>
+		var n = 256;	// размер на матрицата от върхове
+		var data2 = [];
+		var min = 10E10;
+		var max = -min;
+		
+		// първоначално разположение
+		for (var x=0; x<=n; x++)
+		{
+			data2[x] = [];
+			for (var y=0; y<=n; y++)
+				data2[x][y] = [x-n/2,y-n/2,0];
+		}
+		
+		// функция за фрактално създаване на терен
+		function terrain(x1,y1,x2,y2)
+		{
+			var xm = (x1+x2)/2;
+			var ym = (y1+y2)/2;
+			
+			for (var i=0; i<3; i++)
+			{
+				data2[xm][y1][i] = (data2[x1][y1][i]+data2[x2][y1][i])/2;
+				data2[xm][y2][i] = (data2[x1][y2][i]+data2[x2][y2][i])/2;
+				data2[x1][ym][i] = (data2[x1][y1][i]+data2[x1][y2][i])/2;
+				data2[x2][ym][i] = (data2[x2][y1][i]+data2[x2][y2][i])/2;
+				data2[xm][ym][i] = (data2[xm][y1][i]+data2[xm][y2][i])/2;
+
+				var k = (x2-x1)/((i<2)?7:4);
+				data2[xm][y1][i] += random(-k,k);
+				data2[xm][y2][i] += random(-k,k);
+				data2[x1][ym][i] += random(-k,k);
+				data2[x2][ym][i] += random(-k,k);
+				data2[xm][ym][i] += random(-k,k);
+			}
+		}
+		
+		// създаване на терена
+		size = n;
+		while (size>1)
+		{
+			for (var x=0; x<n; x+=size)
+				for (var y=0; y<n; y+=size)
+					terrain(x,y,x+size,y+size);
+			size /= 2;
+		}
+		
+		// намиране колко е най-ниската и най-високата точка
+		var birdX=0,birdY=0;
+		for (var y=0; y<=n; y++)
+		for (var x=0; x<=n; x++)
+		{
+			if (data2[x][y][2]>max)
+			{
+				birdX = data2[x][y][0];
+				birdY = data2[x][y][1];
+			}
+			min = Math.min(min,data2[x][y][2]);
+			max = Math.max(max,data2[x][y][2]);
+		}
+		
+		// хоризонтално и вертикално мащабиране, за да се покрива квадратна зона
+		for (var i=0; i<=n; i++)
+		{
+			var miny=n,maxy=-n,minx=n,maxx=-n;
+			for (var j=0; j<=n; j++)
+			{
+				minx = Math.min(minx,data2[j][i][0]);
+				maxx = Math.max(maxx,data2[j][i][0]);
+				miny = Math.min(miny,data2[i][j][1]);
+				maxy = Math.max(maxy,data2[i][j][1]);
+			}
+			for (var j=0; j<=n; j++)
+			{
+				data2[j][i][0] = ((data2[j][i][0]-minx)/(maxx-minx)-0.5)*n;
+				data2[i][j][1] = ((data2[i][j][1]-miny)/(maxy-miny)-0.5)*n;
+			}
+		}
+
+		// ниво на водата - по средата между най-високата
+		// и най-ниската точка
+		seaLevel = (min+max)/2;
+		
+		// оцветяване според това колко е над или под нивото на водата
+		function color(z)
+		{
+			// цветове по вертикала: жълто->зелено->бяло
+			var h = max-seaLevel;
+			
+			// над морското равнище
+			var dZ = (z-seaLevel)/h;
+			if (0.0<=dZ && dZ<0.1) return [1-10*dZ,random(0.5,0.8),0];
+			if (0.1<=dZ && dZ<0.8) return [(dZ-0.1)/0.7,0.5+random(0.5,1.5)*(dZ-0.1)/0.7*0.5,(dZ-0.1)/0.7];
+			if (0.8<=dZ && dZ<1.1) return [1,1,1];
+
+			// под морското равнище
+			h = seaLevel-min;
+			dZ = -(z-seaLevel)/h;
+			if (0.0<=dZ && dZ<0.05) return [1-10*dZ,1,0*dZ];
+			if (0.05<=dZ && dZ<0.5) return [0,1-(dZ-0.05)/0.45,1];
+			if (0.5<=dZ && dZ<1.1) return [0,0,1-(dZ-0.5)/0.5*0.9];
+
+			// не би трябвало да се стига до тук
+			return [0,0,1];
+		}
+
+		// нормален вектор в точка от терена
+		function normal(x,y)
+		{
+			var xx = x<n?x+1:x-1;
+			var yy = y<n?y+1:y-1;
+			var vx = vectorPoints(data2[x][y],data2[xx][y]);
+			var vy = vectorPoints(data2[x][y],data2[x][yy]);
+			var v = unitVector(vectorProduct(vx,vy));
+			if (data2[x][y][2]<seaLevel) v[2]*=5; // леко замазване на подводните цветове
+			return v;
+		}
+		
+		// случаен терен
+		function RandomTerrain()
+		{
+			var data = [];
+			
+			// генериране на повърхността на терена
+			for (var y=0; y<n; y++) // генериране на лента по лента
+			for (var x=0; x<=n; x++) // протежение на една лента
+			{
+				// координати, цвят и нормален вектор на точка (x,y)
+				var c = color(data2[x][y][2]);
+				var v = normal(x,y);
+				data.push(data2[x][y][0],data2[x][y][1],data2[x][y][2]);
+				data.push(c[0],c[1],c[2]);
+				data.push(v[0],v[1],v[2]);
+
+				// координати, цвят и нормален вектор на точка (x,y+1)
+				c = color(data2[x][y+1][2]);
+				v = normal(x,y+1);
+				data.push(data2[x][y+1][0],data2[x][y+1][1],data2[x][y+1][2]);
+				data.push(c[0],c[1],c[2]);
+				data.push(v[0],v[1],v[2]);
+			}
+			
+			// генериране на околната повърхност - дълга
+			// лента, опасваща квадрата от всички страни
+			for (x=0; x<=n; x++)
+			{
+				data.push(data2[x][0][0],data2[x][0][1],data2[x][0][2]);
+				data.push(data2[x][0][0],data2[x][0][1],-100);
+			}
+			for (y=0; y<=n; y++)
+			{
+				data.push(data2[n][y][0],data2[n][y][1],data2[n][y][2]);
+				data.push(data2[n][y][0],data2[n][y][1],-100);
+			}
+			for (x=n; x>=0; x--)
+			{
+				data.push(data2[x][n][0],data2[x][n][1],data2[x][n][2]);
+				data.push(data2[x][n][0],data2[x][n][1],-100);
+			}
+			for (y=n; y>=0; y--)
+			{
+				data.push(data2[0][y][0],data2[0][y][1],data2[0][y][2]);
+				data.push(data2[0][y][0],data2[0][y][1],-100);
+			}
+			
+			this.buf = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER,this.buf);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+			this.n = n;
+			this.center = [0,0,0];
+			this.size = 1;
+		}
+		
+		// случаен терен - рисуване
+		RandomTerrain.prototype.draw = function(terrain)
+		{
+			pushMatrix();
+			translate(this.center);
+			scale([this.size,this.size,this.size]);
+			useMatrix();
+				gl.bindBuffer(gl.ARRAY_BUFFER,this.buf);
+				gl.enableVertexAttribArray(aXYZ);
+				if (terrain)
+				{
+					// рисуване на терена (без околната лента)
+					gl.enableVertexAttribArray(aColor);
+					gl.enableVertexAttribArray(aNormal);
+					gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,9*FLOATS,0*FLOATS);
+					gl.vertexAttribPointer(aColor,3,gl.FLOAT,false,9*FLOATS,3*FLOATS);
+					gl.vertexAttribPointer(aNormal,3,gl.FLOAT,false,9*FLOATS,6*FLOATS);
+				
+					for (var i=0; i<this.n; i++)
+						gl.drawArrays(gl.TRIANGLE_STRIP,2*(this.n+1)*i,2*(this.n+1));
+					gl.disableVertexAttribArray(aColor);
+				}
+				else
+				{
+					// рисуване на околната стена (без терена)
+					gl.disableVertexAttribArray(aColor);
+					gl.disableVertexAttribArray(aNormal);
+					gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,3*FLOATS,0*FLOATS);
+					gl.vertexAttrib3f(aColor,0,0,0);
+					gl.vertexAttrib3f(aNormal,0,0,0);
+					gl.drawArrays(gl.TRIANGLE_STRIP,3*2*(this.n+1)*this.n,8*(this.n+1));
+				}
+				
+			popMatrix();
+		}
+		
+		function start( )
+		{
+			var	canvas = document.getElementById("picasso");
+			canvas.addEventListener('webglcontextlost',function(event){event.preventDefault();},false);
+			canvas.addEventListener('webglcontextrestored',function(){init();},false);
+
+			init();
+			drawFrame();
+		}
+		
+		function init()
+		{
+			gl = getContext("picasso");
+			glprog = getProgram(vShader,fShader);
+			getVariables();
+
+			gl.enable(gl.DEPTH_TEST);
+			gl.clearColor(0.8,0.9,1,1);
+
+			// магически код за поддръжка на прозрачност на водата
+			gl.enable(gl.BLEND);
+			gl.blendFunc(gl.SRC_ALPHA,gl.SRC_ONE_MINUS_ALPHA);
+			gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+			
+			identity();
+			perspective(30,gl.canvas.width/gl.canvas.height,1,40000);
+			gl.uniform1i(uUseNormalMatrix,false);
+
+			gl.uniform3f(uAmbientColor,0.3,0.3,0.3);
+			gl.uniform3f(uDiffuseColor,1,1,1);
+			gl.uniform3f(uLightDir,0,0,-1);
+
+			// създаване на случаен терен
+			terra = new RandomTerrain();
+			
+			// водата
+			water = new Cuboid([0,0,(seaLevel+min)/2],[n-1,n-1,seaLevel-min]);
+			water.color = [0,0,0.5];
+			
+			// птици
+			bn = 20;
+			bird = [];
+			for (var i=0; i<bn; i++)
+			{
+				bird[i] = new Cube([0,0,0],0.7);
+				bird[i].color = [0,0,0];
+				bird[i].s = [random(1,2)/6,random(1,2)/6,random(1,2)/6];
+				bird[i].o = [random(0,2*PI),random(0,2*PI),random(0,2*PI)];
+			}
+		}
+
+		var time = now();
+		function now() { return (new Date()).getTime()/1000; }
+		
+		function drawFrame()
+		{
+			time = now();
+			gl.clear(gl.COLOR_BUFFER_BIT+gl.DEPTH_BUFFER_BIT);
+			
+			lookAt([250*cos(time/3),450*sin(time/3),200+100*sin(time/2)],[0,0,seaLevel],[0,0,1]);
+
+			// рисуване на същинската част на терена
+			gl.depthMask(true);
+			gl.uniform1f(uAlpha,1);
+			terra.draw(true);
+
+			// рисуване на водата
+			gl.depthMask(false);
+			gl.uniform1f(uAlpha,0.7);
+			water.draw();
+			
+			// рисуване на околната стена на терена
+			gl.depthMask(true);
+			gl.uniform1f(uAlpha,1);
+			terra.draw(false);
+
+			// полет на птиците
+			for (var i=0; i<bn; i++)
+			{
+				bird[i].center[0] = birdX + 50*sin(bird[i].s[0]*time+bird[i].o[0]);
+				bird[i].center[1] = birdY + 50*sin(bird[i].s[1]*time+bird[i].o[1]);
+				bird[i].center[2] = max + 5*sin(bird[i].s[2]*time+bird[i].o[2]);
+				bird[i].draw();
+			}
+			requestAnimationFrame(drawFrame);
+		}
+	</script>	
+</head>
+
+<body onload="start()">
+	<h2>Заливът</h2>
+
+	<noscript>
+		Искаме JavaScript, но няма!
+	</noscript>
+	
+	<canvas id="picasso" width="600" height="400" style="border: solid;">
+		Искаме canvas, но няма!
+	</canvas>
+</body>

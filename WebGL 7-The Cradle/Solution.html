@@ -1,0 +1,253 @@
+﻿<!DOCTYPE html>
+
+<head>
+	<meta charset="utf-8"/>
+	<title>Люлката</title>
+
+	<script src="webgl-fmi.js"></script>
+	
+	<script id="vshader" type="x-shader/x-vertex">
+		uniform mat4 uProjectionMatrix;
+		uniform mat4 uViewMatrix;
+		uniform mat4 uModelMatrix;
+		
+		uniform bool uUseAmbient;
+		uniform vec3 uAmbientColor;
+
+		uniform bool uUseDiffuse;
+		uniform vec3 uDiffuseColor;
+
+		uniform vec3 uLightDir;
+		
+		attribute vec3 aXYZ;		// координати на връх
+		attribute vec3 aColor;		// цвят на връх
+		attribute vec3 aNormal;		// нормален вектор на връх
+
+		varying vec3 vNormal;
+		varying vec3 vColor;
+		varying vec3 vPos;
+		
+		void main ()
+		{
+			mat4 mvMatrix = uViewMatrix * uModelMatrix;
+			vec4 pos = mvMatrix * vec4(aXYZ,1);
+			gl_Position = uProjectionMatrix * pos;
+
+			// околна светлина
+			vColor = aColor;
+			if (uUseAmbient)
+				vColor *= uAmbientColor;
+			
+			// дифузно отражение
+			vec3 normal = vec3(normalize(mvMatrix*vec4(aNormal,0)));
+			vec3 light = normalize(-uLightDir);
+			if (uUseDiffuse)
+				vColor += aColor*uDiffuseColor*max(dot(normal,light),0.0);
+
+			vPos = pos.xyz/pos.w;
+			vNormal = normal;
+		}
+	</script>
+	
+	<script id="fshader" type="x-shader/x-fragment">
+		precision mediump float;
+
+		// преместено тук от другия шейдър
+		uniform highp vec3 uLightDir;
+		uniform bool uUseSpecular;
+		uniform vec3 uSpecularColor;
+
+		varying vec3 vNormal;
+		varying vec3 vColor;
+		varying vec3 vPos;
+
+		void main( )
+		{
+			vec3 light = normalize(-uLightDir);
+			
+			// намиране на отразения лъч
+			vec3 reflectedLight = normalize(reflect(light,normalize(vNormal)));
+
+			// в локалната координатна система "окото" на гледащия е в (0,0,0),
+			// а векторът от точката до "окото" е pos-(0,0,0) = pos
+			vec3 viewDir = normalize(vPos);
+
+			// готови сме да сметнем лъскавината
+			vec3 specularColor = vec3(0);
+			if (uUseSpecular)
+			{
+				float cosa = abs(dot(reflectedLight,viewDir));
+				specularColor = vec3(pow(cosa,4.0));
+			}
+			
+			gl_FragColor = vec4(vColor+specularColor/2.0,1);
+		}
+	</script>
+
+	<script>
+		function start( )
+		{
+			var	canvas = document.getElementById("picasso");
+			canvas.addEventListener('webglcontextlost',function(event){event.preventDefault();},false);
+			canvas.addEventListener('webglcontextrestored',function(){init();},false);
+
+			init();
+			drawFrame();
+		}
+		
+		function init()
+		{
+			gl = getContext("picasso");
+			glprog = getProgram("vshader","fshader");
+
+			
+			aXYZ = gl.getAttribLocation(glprog,"aXYZ");
+			uProjectionMatrix = gl.getUniformLocation(glprog,"uProjectionMatrix");
+			uViewMatrix = gl.getUniformLocation(glprog,"uViewMatrix");
+			uModelMatrix = gl.getUniformLocation(glprog,"uModelMatrix");
+
+			aColor = gl.getAttribLocation(glprog,"aColor");
+			uAmbientColor = gl.getUniformLocation(glprog,"uAmbientColor");
+			uUseAmbient   = gl.getUniformLocation(glprog,"uUseAmbient");
+
+			aNormal = gl.getAttribLocation(glprog,"aNormal");
+			uDiffuseColor = gl.getUniformLocation(glprog,"uDiffuseColor");
+			uUseDiffuse = gl.getUniformLocation(glprog,"uUseDiffuse");
+			uUseSpecular = gl.getUniformLocation(glprog,"uUseSpecular");
+			uLightDir = gl.getUniformLocation(glprog,"uLightDir");
+
+			gl.enable(gl.DEPTH_TEST);
+			gl.clearColor(0.8,0.9,0.7,1);
+
+			identity();
+			perspective(30,gl.canvas.width/gl.canvas.height,1,40000);
+
+			gl.uniform3f(uAmbientColor,0.7,0.7,0.7);
+			gl.uniform1i(uUseAmbient,true);
+
+			gl.uniform3f(uDiffuseColor,1,1,1);
+			gl.uniform1i(uUseDiffuse,true);
+			
+			gl.uniform3f(uLightDir,0,-1,-0.3);
+
+			// едно топче с един конец
+			ball = new Sphere([0,0,0],1);
+			ball.color = [0.4,0.4,0.45];
+			thread = new Cone([0,0,0],0.1,10/cos(radians(33)));
+			thread.color = [0.1,0.1,0.1];
+			
+			// стойка
+			var x = n+4-1/2;
+			var y = 7-1/2;
+			base = [];
+			base[0] = new Cuboid([0,0,-10.5],[2*n+8,14,1]);
+			base[0].color = [0.4,0.4,0.4];
+			base[1] = new Sphere([x,y,-10],1);
+			base[2] = new Sphere([x,-y,-10],1);
+			base[3] = new Sphere([-x,y,-10],1);
+			base[4] = new Sphere([-x,-y,-10],1);
+			base[5] = new Cylinder([x,y,-12],1,2);
+			base[6] = new Cylinder([x,-y,-12],1,2);
+			base[7] = new Cylinder([-x,y,-12],1,2);
+			base[8] = new Cylinder([-x,-y,-12],1,2);
+			base[9] = new Cylinder([x,y,-10],0.35,17);
+			base[10] = new Cylinder([x,-y,-10],0.35,17);
+			base[11] = new Cylinder([-x,y,-10],0.35,17);
+			base[12] = new Cylinder([-x,-y,-10],0.35,17);
+			base[13] = new Sphere([x,y,7],0.35,17);
+			base[14] = new Sphere([x,-y,7],0.35,17);
+			base[15] = new Sphere([-x,y,7],0.35,17);
+			base[16] = new Sphere([-x,-y,7],0.35,17);
+			base[17] = new Cylinder([-7,-y,-x],0.35,2*x);
+			base[18] = new Cylinder([-7,y,-x],0.35,2*x);
+
+			for (var i=0; i<base.length; i++)
+			{
+				if (i>8) base[i].color = [0.8,0.8,0.8];
+				else
+				if (i>0) base[i].color = [0.2,0.1,0.1];
+			}
+		}
+
+		var frame = 0;
+	
+		var n = 8;		// брой топки
+		var angle = 0;	// ъгъл на люлеене (в градуси)
+		
+		function drawFrame()
+		{
+			frame++;
+			gl.clear(gl.COLOR_BUFFER_BIT+gl.DEPTH_BUFFER_BIT);
+
+			//frame = 160;
+			lookAt([55*Math.cos(frame/300),55*Math.sin(frame/300),0], [0,0,-2], [0,0,1]);
+
+			// нов ъгъл на люлеене
+			angle = 45*sin(frame/10);
+			
+			// рисуване на стойката
+			pushMatrix();
+			for (var i=0; i<base.length; i++)
+			{
+				if (i==1) gl.uniform1i(uUseSpecular,true);
+				if (i==17) yRotate(90);
+				if (i==19) xRotate(90);
+				if (i>=9 && i<=12)
+					gl.uniform3f(uLightDir,-1,0,0);
+				else
+					gl.uniform3f(uLightDir,0,-1,-0.3);
+				base[i].draw();
+			}
+			popMatrix();
+			
+			// рисуване на n топчета
+			for (var i=0; i<n; i++)
+			{
+				pushMatrix();
+				translate([2*(i-(n-1)/2),0,7]);
+				
+				// топчетата в единия край реагират
+				// само на положителни ъгли
+				if (angle>0)
+				{
+					yRotate(angle/Math.pow(3,i));
+				}
+				
+				// топчетата в другия край реагират
+				// само на отрицателни ъгли
+				if (angle<0)
+				{
+					yRotate(angle/Math.pow(3,n-i-1));
+				}
+
+				translate([0,0,-10]);
+				
+				// рисуване на лъскаво топче
+				gl.uniform1i(uUseSpecular,true);
+				ball.draw();
+				gl.uniform1i(uUseSpecular,false);
+				
+				// рисуване на двата конеца
+				xRotate(33);
+				thread.draw();
+				xRotate(-66);
+				thread.draw();
+				popMatrix();
+			}
+			
+			requestAnimationFrame(drawFrame);
+		}
+	</script>	
+</head>
+
+<body onload="start()">
+	<h2>Люлката</h2>
+
+	<noscript>
+		Искаме JavaScript, но няма!
+	</noscript>
+	
+	<canvas id="picasso" width="600" height="400" style="border: solid;">
+		Искаме canvas, но няма!
+	</canvas>
+</body>

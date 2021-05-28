@@ -1,0 +1,152 @@
+﻿	<!DOCTYPE html>
+
+<head>
+	<meta charset="utf-8"/>
+	<title>Роботът</title>
+
+	<script src="webgl-fmi.js"></script>
+	<script src="shaders.js"></script>
+	<script src="skeleton.js"></script>
+	
+	<script>
+		function start( )
+		{
+			var	canvas = document.getElementById("picasso");
+			canvas.addEventListener('webglcontextlost',function(event){event.preventDefault();},false);
+			canvas.addEventListener('webglcontextrestored',function(){init();},false);
+
+			init();
+			drawFrame();
+		}
+		
+		function custom(obj,props)
+		{
+			for(var n in props) obj[n]=props[n];
+			return obj;
+		}
+		
+		function init()
+		{
+			gl = getContext("picasso");
+			glprog = getProgram(vShader,fShader);
+			getVariables();
+
+			gl.enable(gl.DEPTH_TEST);
+			gl.clearColor(1,1,1,1);
+
+			identity();
+			perspective(30,gl.canvas.width/gl.canvas.height,1,40000);
+			gl.uniform1i(uUseNormalMatrix,false);
+
+			gl.uniform3f(uAmbientColor,0.3,0.3,0.3);
+			gl.uniform3f(uDiffuseColor,1,1,1);
+			gl.uniform3f(uLightDir,0,0,-1);
+
+			// цветове
+			var gray = [0.6,0.6,0.6];
+			var beige = [0.7,0.7,0.55];
+			var blue = [0,0,0.7];
+			var red = [0.7,0,0];
+			var green = [0,0.7,0];
+			var yellow = [0.7,0.7,0];
+			
+			robot = [];
+			
+			// стойка [0,1]
+			robot.push(	new Bone(2,
+				[ custom(new Cylinder([0,0,0],7,2),{color:gray}),
+				  custom(new Cone([0,0,2],7,1),{color:gray}) ] )
+			);
+			robot.push(	new Bone(9,
+				[ custom(new Cylinder([0,0,0],1,7), {color:gray}),
+				  custom(new Cuboid([0,0,7],[4,4,2]),{color:beige}) ] )
+			);
+			// синя кост [2]
+			robot.push( new Bone(7,
+				[ custom(new Cylinder([0,0,0],2,6),{color:gray,rot:[-90,90],offset:[0,0,-0.5]}),
+				  custom(new Cylinder([0,0,0],2,6),{color:gray,rot:[-90,90],offset:[0,-3.5,-0.5]}),
+				  custom(new Cylinder([0,0,0],2,0.5),{color:blue,rot:[-90,90],offset:[0,0,-7]}),
+				  custom(new Cylinder([0,0,0],2,0.5),{color:blue,rot:[-90,90],offset:[0,0,6]}),
+				  custom(new Cylinder([0,0,0],2,0.5),{color:blue,rot:[-90,90],offset:[0,-3.5,-7]}),
+				  custom(new Cylinder([0,0,0],2,0.5),{color:blue,rot:[-90,90],offset:[0,-3.5,6]}),
+				  custom(new Cuboid([0,0,0],[0.5,4,7]),{color:blue,offset:[6.5,0,0.5]}),
+				  custom(new Cuboid([0,0,0],[0.5,4,7]),{color:blue,offset:[-6.5,0,0.5]})
+				  ])
+			);
+			// шарена кост [3]
+			robot.push(	new Bone(9.5,
+				[ custom(new Cuboid([0,0,0],[4,4,2]),{color:beige,offset:[0,0,1.0]}), 
+				  custom(new Cylinder([0,0,1],1,1.5), {color:gray}),
+				  custom(new Cylinder([0,0,2.5],1,0.5), {color:red}),
+				  custom(new Cylinder([0,0,3.0],1,2.5), {color:green}),
+				  custom(new Cylinder([0,0,5.5],1,0.5), {color:red}),
+				  custom(new Cylinder([0,0,6.0],1,0.5), {color:gray}),
+				  custom(new Cylinder([0,0,6.5],1,0.5), {color:yellow}),
+				  custom(new Cylinder([0,0,7.0],1,1), {color:green})
+				]) 
+			);
+			// бял единичен цилиндър [4]
+			robot.push( new Bone(5,
+				[ custom(new Cylinder([0,0,0],2,7),{color:gray,rot:[-90,90],offset:[0,0,-0.5]}),
+				  custom(new Cuboid([0,0,0],[0.5,4,5]),{color:gray,offset:[6.5,0,0.5]}),
+				  custom(new Cuboid([0,0,0],[0.5,4,5]),{color:gray,offset:[-6.5,0,0.5]}),
+				  custom(new Cuboid([0,0,4.5],[6,4,0.5]),{color:gray,offset:[0,0,0.5]})
+				 ])
+			);
+			// накрайник [5]
+			robot.push( new Bone(0,
+				[ custom(new Cylinder([0,0,0],2,5),{color:gray}),
+				  custom(new Cylinder([0,0,5],2,0.5),{color:red}),
+				  custom(new Cuboid([0,0,5],[3,1,3]),{color:yellow}),
+				  custom(new Cuboid([0,0,5],[1,3,3]),{color:yellow})
+				 ])
+			);
+		}
+
+		var frame = 0;
+		
+		var time = now();
+		var oldTime = time;
+		function now() { return (new Date()).getTime()/1000; }
+		var t = 0;
+		
+		function drawFrame()
+		{
+			time = now();
+			var dTime = time-oldTime;
+			oldTime = time;
+			
+			frame++;
+			gl.clear(gl.COLOR_BUFFER_BIT+gl.DEPTH_BUFFER_BIT);
+			
+			lookAt([80*cos(time/3),80*sin(time/3),40],[0,0,17],[0,0,1]);
+
+			// движение на робота
+			robot[1].rot = [360*sin(time*0.3)];	// DOF #1
+			robot[2].rot = [0,0,60*sin(time*0.6)];	// DOF #2
+			robot[3].rot = [0,0,60*cos(time*1.2)];	// DOF #3
+			robot[4].rot = [360*cos(time*0.2),0,60*sin(time*2)];	// DOF #4,#5
+			robot[5].rot = [600*time];	// DOF #6
+			
+			// рисуване на робота
+			pushMatrix();
+			for (var i=0; i<robot.length; i++)
+				robot[i].draw();
+			popMatrix();
+
+			requestAnimationFrame(drawFrame);
+		}
+	</script>	
+</head>
+
+<body onload="start()">
+	<h2>Роботът</h2>
+
+	<noscript>
+		Искаме JavaScript, но няма!
+	</noscript>
+	
+	<canvas id="picasso" width="600" height="400" style="border: solid;">
+		Искаме canvas, но няма!
+	</canvas>
+</body>
